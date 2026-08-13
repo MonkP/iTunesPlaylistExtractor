@@ -85,6 +85,7 @@
             this.btnChooseRootPath.TabIndex = 5;
             this.btnChooseRootPath.Text = "...";
             this.btnChooseRootPath.UseVisualStyleBackColor = true;
+            this.btnChooseRootPath.Click += new System.EventHandler(this.btnChooseRootPath_Click);
             // 
             // label2
             // 
@@ -115,6 +116,7 @@
             this.btnChooseTargetPath.TabIndex = 8;
             this.btnChooseTargetPath.Text = "...";
             this.btnChooseTargetPath.UseVisualStyleBackColor = true;
+            this.btnChooseTargetPath.Click += new System.EventHandler(this.btnChooseTargetPath_Click);
             // 
             // label3
             // 
