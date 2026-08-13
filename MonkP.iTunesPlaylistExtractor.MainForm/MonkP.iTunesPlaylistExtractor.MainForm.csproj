@@ -59,6 +59,7 @@
     <Compile Include="LibraryPlaylist.cs" />
     <Compile Include="LibraryPlaylistParser.cs" />
     <Compile Include="LogHelper.cs" />
+    <Compile Include="PlaylistExtractor.cs" />
     <Compile Include="PreferenceStore.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

@@ -81,6 +81,29 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
             WriterThread.Join(TimeSpan.FromSeconds(30));
         }
 
+        /// <summary>等待截至调用时已入队的日志全部写完，用于紧接着就要读取日志文件的场景。</summary>
+        internal static void Flush(TimeSpan timeout)
+        {
+            if (_shutdownRequested != 0)
+                return;
+            var barrier = new ManualResetEventSlim(false);
+            try
+            {
+                LogQueue.Add(new LogEntry { Barrier = barrier });
+            }
+            catch (InvalidOperationException)
+            {
+                return;
+            }
+            barrier.Wait(timeout);
+        }
+
+        /// <summary>运行目录下的日志目录。</summary>
+        internal static string LogDirectory => Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "log");
+
+        /// <summary>返回指定本地日期对应的日志文件路径（yyyy-MM-dd.log）。</summary>
+        internal static string GetLogFile(DateTime localDate) => Path.Combine(LogDirectory, $"{localDate:yyyy-MM-dd}.log");
+
         /// <summary>
         /// 日志格式：UTC 毫秒时间戳:级别 / content / 序列化的 ex / 空行，
         /// 各部分之间以当前环境换行符分隔。
@@ -175,7 +198,6 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
         /// </summary>
         private static void WriterLoop()
         {
-            var logDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "log");
             StreamWriter writer = null;
             DateTime currentDate = DateTime.MinValue;
             try
@@ -185,22 +207,29 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
                 {
                     try
                     {
-                        // 跨天或首次写入时创建/切换日志文件
-                        if (writer == null || entry.LocalDate.Date != currentDate)
+                        // Text 为空表示仅为 Flush 的同步屏障，不写内容
+                        if (entry.Text != null)
                         {
-                            writer?.Dispose();
-                            Directory.CreateDirectory(logDirectory);
-                            var logFile = Path.Combine(logDirectory, $"{entry.LocalDate:yyyy-MM-dd}.log");
-                            // 以追加模式、带 BOM 的 UTF-8 编码打开
-                            writer = new StreamWriter(logFile, true, new UTF8Encoding(true));
-                            currentDate = entry.LocalDate.Date;
+                            // 跨天或首次写入时创建/切换日志文件
+                            if (writer == null || entry.LocalDate.Date != currentDate)
+                            {
+                                writer?.Dispose();
+                                Directory.CreateDirectory(LogDirectory);
+                                // 以追加模式、带 BOM 的 UTF-8 编码打开
+                                writer = new StreamWriter(GetLogFile(entry.LocalDate), true, new UTF8Encoding(true));
+                                currentDate = entry.LocalDate.Date;
+                            }
+                            writer.Write(entry.Text);
+                            writer.Flush();
                         }
-                        writer.Write(entry.Text);
-                        writer.Flush();
                     }
                     catch
                     {
                         // 日志写入失败不应影响程序运行，静默忽略
+                    }
+                    finally
+                    {
+                        entry.Barrier?.Set();
                     }
                 }
             }
@@ -215,8 +244,10 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
         {
             /// <summary>日志产生的本地日期，用于按天分文件。</summary>
             public DateTime LocalDate { get; set; }
-            /// <summary>已格式化的日志文本。</summary>
+            /// <summary>已格式化的日志文本，为 null 时表示仅为同步屏障。</summary>
             public string Text { get; set; }
+            /// <summary>同步屏障，<see cref="Flush"/> 时用于等待此前的日志写完。</summary>
+            public ManualResetEventSlim Barrier { get; set; }
         }
     }
 }
