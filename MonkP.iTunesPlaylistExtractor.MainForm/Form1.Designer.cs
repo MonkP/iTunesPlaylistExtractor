@@ -145,6 +145,7 @@
             this.btnExtract.TabIndex = 9;
             this.btnExtract.Text = "Extract";
             this.btnExtract.UseVisualStyleBackColor = true;
+            this.btnExtract.Click += new System.EventHandler(this.btnExtract_Click);
             // 
             // listViewPlaylists
             // 
@@ -198,6 +199,7 @@
             this.Controls.Add(this.txtLibraryFilePath);
             this.Name = "Form1";
             this.Text = "iTunes Playlist Extractor";
+            this.Load += new System.EventHandler(this.Form1_Load);
             this.ResumeLayout(false);
             this.PerformLayout();
 

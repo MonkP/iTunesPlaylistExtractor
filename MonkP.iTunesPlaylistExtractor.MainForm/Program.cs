@@ -16,7 +16,20 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new Form1());
+            try
+            {
+                Application.Run(new Form1());
+            }
+            catch (Exception ex)
+            {
+                LogHelper.WriteLog(LogHelper.LogLevel.Fatal, "Unhandled exception, application exiting.", ex);
+                throw;
+            }
+            finally
+            {
+                // 正常退出前确保队列中的日志全部写完
+                LogHelper.Shutdown();
+            }
         }
     }
 }
