@@ -27,20 +27,30 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
         /// <summary>默认输出日志级别，从 preference.json 加载，未配置时为 Error。</summary>
         internal static volatile LogLevel DefaultLevel = LogLevel.Error;
 
+        /// <summary>Windows API 常量：标准输出句柄。</summary>
         private const int StdOutputHandle = -11;
 
+        /// <summary>日志队列，调用方写入、后台线程消费。</summary>
         private static readonly BlockingCollection<LogEntry> LogQueue = new BlockingCollection<LogEntry>();
+        /// <summary>后台日志写入线程，负责从队列中取出日志并写入文件。</summary>
         private static readonly Thread WriterThread;
+        /// <summary>当前进程是否拥有可用的控制台窗口（用于决定是否输出到控制台）。</summary>
         private static readonly bool HasConsole;
+        /// <summary>关闭标志：0=未关闭，1=已请求关闭，通过 CAS 保证只设置一次。</summary>
         private static int _shutdownRequested;
 
+        /// <summary>
+        /// 静态构造函数：检测控制台可用性并启动后台日志写入线程。
+        /// </summary>
         static LogHelper()
         {
+            // 通过标准输出句柄判断当前进程是否附带控制台
             HasConsole = GetStdHandle(StdOutputHandle) != IntPtr.Zero;
             WriterThread = new Thread(WriterLoop) { IsBackground = true, Name = "LogWriter" };
             WriterThread.Start();
         }
 
+        /// <summary>Windows API：获取指定标准设备（如标准输出）的句柄，用于检测控制台是否存在。</summary>
         [DllImport("kernel32.dll")]
         private static extern IntPtr GetStdHandle(int nStdHandle);
 
@@ -90,7 +100,10 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
             return builder.ToString();
         }
 
-        /// <summary>将异常（含 InnerException 链）序列化为 JSON，包含 Type、Message、StackTrace。</summary>
+        /// <summary>
+        /// 将异常（含 InnerException 链）递归序列化为 JSON 字符串，包含 Type、Message、StackTrace。
+        /// 序列化失败时回退为简单的文本格式。
+        /// </summary>
         private static string SerializeException(Exception ex)
         {
             try
@@ -105,6 +118,10 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
             }
         }
 
+        /// <summary>
+        /// 递归将异常对象追加为 JSON 格式，包含 Type、Message、StackTrace 三个字段；
+        /// 若存在 InnerException 则递归追加为嵌套的 "InnerException" 字段。
+        /// </summary>
         private static void AppendExceptionJson(StringBuilder builder, Exception ex)
         {
             builder.Append('{');
@@ -119,6 +136,10 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
             builder.Append('}');
         }
 
+        /// <summary>
+        /// 将字符串转换为 JSON 格式的带引号字符串，对特殊字符进行转义
+        /// （双引号、反斜杠、换行、制表符及控制字符）；null 输入返回 "null"。
+        /// </summary>
         private static string ToJsonString(string value)
         {
             if (value == null)
@@ -135,6 +156,7 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
                     case '\n': builder.Append("\\n"); break;
                     case '\t': builder.Append("\\t"); break;
                     default:
+                        // 其他控制字符使用 \uXXXX 转义
                         if (ch < ' ')
                             builder.Append("\\u").Append(((int)ch).ToString("x4"));
                         else
@@ -146,6 +168,11 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
             return builder.ToString();
         }
 
+        /// <summary>
+        /// 后台写入线程的主循环：从 <see cref="LogQueue"/> 中消费日志条目，
+        /// 按日期分文件写入运行目录下的 log 文件夹（yyyy-MM-dd.log）；
+        /// 跨天时自动切换文件，每条写入后立即 Flush。
+        /// </summary>
         private static void WriterLoop()
         {
             var logDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "log");
@@ -153,15 +180,18 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
             DateTime currentDate = DateTime.MinValue;
             try
             {
+                // 阻塞式消费队列，直到 CompleteAdding 被调用
                 foreach (var entry in LogQueue.GetConsumingEnumerable())
                 {
                     try
                     {
+                        // 跨天或首次写入时创建/切换日志文件
                         if (writer == null || entry.LocalDate.Date != currentDate)
                         {
                             writer?.Dispose();
                             Directory.CreateDirectory(logDirectory);
                             var logFile = Path.Combine(logDirectory, $"{entry.LocalDate:yyyy-MM-dd}.log");
+                            // 以追加模式、带 BOM 的 UTF-8 编码打开
                             writer = new StreamWriter(logFile, true, new UTF8Encoding(true));
                             currentDate = entry.LocalDate.Date;
                         }
@@ -170,7 +200,7 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
                     }
                     catch
                     {
-                        // 日志写入失败不应影响程序运行
+                        // 日志写入失败不应影响程序运行，静默忽略
                     }
                 }
             }
@@ -180,9 +210,12 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
             }
         }
 
+        /// <summary>日志队列中的单条记录，包含本地日期（用于分文件）和格式化后的日志文本。</summary>
         private class LogEntry
         {
+            /// <summary>日志产生的本地日期，用于按天分文件。</summary>
             public DateTime LocalDate { get; set; }
+            /// <summary>已格式化的日志文本。</summary>
             public string Text { get; set; }
         }
     }
