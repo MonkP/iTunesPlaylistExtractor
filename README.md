@@ -20,3 +20,13 @@ I looked for alternatives but found nothing. Besides I don't like the way double
 
 1. Add MTP abilities so you can choose a path on your Android device as target path.
 2. With MTP, check the existing `.m3u` and music files in target path, then perform a proper synchronization rather than adding only.
+
+## Acknowledgements
+
+This project uses [iTunesLibraryParser](https://github.com/asciamanna/iTunesLibraryParser), Copyright (c) 2018 Anthony Sciamanna, licensed under the [MIT License](iTunesLibraryParser-master/LICENSE):
+
+> Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
