@@ -29,7 +29,7 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
         }
 
         /// <summary>
-        /// 窗体加载时调用：从偏好文件恢复上次的路径、日志级别及勾选状态；
+        /// 窗体加载时调用：从偏好文件恢复上次的路径、日志级别、覆盖开关及勾选状态；
         /// 若资料库 XML 文件存在则自动触发加载。
         /// </summary>
         private void Form1_Load(object sender, EventArgs e)
@@ -43,6 +43,7 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
             txtLibraryFilePath.Text = preferences.LibraryFilePath ?? string.Empty;
             txtRootPath.Text = preferences.RootPath ?? string.Empty;
             txtTargetBox.Text = preferences.TargetPath ?? string.Empty;
+            ckbOverWrite.Checked = preferences.OverwriteFiles;
             if (Enum.TryParse(preferences.LogLevel, true, out LogHelper.LogLevel logLevel))
                 LogHelper.DefaultLevel = logLevel;
 
@@ -102,6 +103,7 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
         /// <summary>
         /// 「Extract」按钮点击处理：先保存偏好，然后校验前置条件，
         /// 在后台线程执行提取（复制曲目文件、生成 m3u），
+        /// 然后询问是否删除目标路径中不属于本次提取结果的文件；
         /// 完成后在状态栏和弹窗显示汇总；若过程有错误，关闭弹窗后自动打开当日日志文件。
         /// </summary>
         private async void btnExtract_Click(object sender, EventArgs e)
@@ -142,8 +144,29 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
             var progress = new Progress<string>(status => lblStatus.Text = status);
             try
             {
-                var result = await Task.Run(() => PlaylistExtractor.Extract(rootPath, targetPath, playlists, progress));
+                var result = await Task.Run(() => PlaylistExtractor.Extract(
+                    rootPath, targetPath, playlists, ckbOverWrite.Checked, progress));
                 var summary = result.BuildSummary();
+
+                // 无论是否启用覆盖，都检查目标路径中不属于本次提取结果的文件
+                // （本次未勾选列表的 m3u，或勾选列表未包含的曲目文件）
+                var extraFiles = PlaylistExtractor.FindExtraFiles(targetPath,
+                    result.ExpectedTrackRelPaths,
+                    playlists.Select(p => p.M3uFileName).ToList());
+                if (extraFiles.Count > 0)
+                {
+                    var choice = MessageBox.Show(this,
+                        "Target Path contains files that not included in playlists choosen this time, would you like to delete them?",
+                        "Extract", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                    if (choice == DialogResult.Yes)
+                    {
+                        var deleted = PlaylistExtractor.DeleteFiles(extraFiles);
+                        LogHelper.WriteLog(LogHelper.LogLevel.Info,
+                            $"Deleted {deleted} extra files from \"{targetPath}\".");
+                        summary += $" Deleted {deleted} extra files.";
+                    }
+                }
+
                 lblStatus.Text = summary;
                 MessageBox.Show(this, summary, "Extract", MessageBoxButtons.OK,
                     result.HasIssues ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
@@ -237,7 +260,7 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
         }
 
         /// <summary>
-        /// 将窗体当前选择的路径与勾选的播放列表 Persistent ID 写入运行目录下的 preference.json。
+        /// 将窗体当前选择的路径、覆盖开关与勾选的播放列表 Persistent ID 写入运行目录下的 preference.json。
         /// </summary>
         private void SavePreferences()
         {
@@ -256,6 +279,7 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
                     RootPath = txtRootPath.Text?.Trim(),
                     TargetPath = txtTargetBox.Text?.Trim(),
                     CheckedPlaylistPersistentIds = checkedIds,
+                    OverwriteFiles = ckbOverWrite.Checked,
                     LogLevel = LogHelper.DefaultLevel.ToString(),
                 });
             }

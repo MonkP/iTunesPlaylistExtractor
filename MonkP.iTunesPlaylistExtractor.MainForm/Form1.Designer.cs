@@ -39,9 +39,10 @@
             this.txtTargetBox = new System.Windows.Forms.TextBox();
             this.btnExtract = new System.Windows.Forms.Button();
             this.listViewPlaylists = new System.Windows.Forms.ListView();
-            this.lblStatus = new System.Windows.Forms.Label();
             this.colName = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
             this.colCount = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
+            this.lblStatus = new System.Windows.Forms.Label();
+            this.ckbOverWrite = new System.Windows.Forms.CheckBox();
             this.SuspendLayout();
             // 
             // txtLibraryFilePath
@@ -109,7 +110,7 @@
             // btnChooseTargetPath
             // 
             this.btnChooseTargetPath.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.btnChooseTargetPath.Location = new System.Drawing.Point(659, 591);
+            this.btnChooseTargetPath.Location = new System.Drawing.Point(604, 591);
             this.btnChooseTargetPath.Margin = new System.Windows.Forms.Padding(0);
             this.btnChooseTargetPath.Name = "btnChooseTargetPath";
             this.btnChooseTargetPath.Size = new System.Drawing.Size(25, 23);
@@ -134,7 +135,7 @@
             this.txtTargetBox.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.txtTargetBox.Location = new System.Drawing.Point(117, 591);
             this.txtTargetBox.Name = "txtTargetBox";
-            this.txtTargetBox.Size = new System.Drawing.Size(539, 23);
+            this.txtTargetBox.Size = new System.Drawing.Size(484, 23);
             this.txtTargetBox.TabIndex = 6;
             // 
             // btnExtract
@@ -161,15 +162,6 @@
             this.listViewPlaylists.UseCompatibleStateImageBehavior = false;
             this.listViewPlaylists.View = System.Windows.Forms.View.Details;
             // 
-            // lblStatus
-            // 
-            this.lblStatus.AutoSize = true;
-            this.lblStatus.Location = new System.Drawing.Point(13, 548);
-            this.lblStatus.Name = "lblStatus";
-            this.lblStatus.Size = new System.Drawing.Size(47, 12);
-            this.lblStatus.TabIndex = 11;
-            this.lblStatus.Text = "Standby";
-            // 
             // colName
             // 
             this.colName.Text = "Playlist Name";
@@ -180,11 +172,31 @@
             this.colCount.Text = "Item Count";
             this.colCount.Width = 150;
             // 
+            // lblStatus
+            // 
+            this.lblStatus.AutoSize = true;
+            this.lblStatus.Location = new System.Drawing.Point(13, 548);
+            this.lblStatus.Name = "lblStatus";
+            this.lblStatus.Size = new System.Drawing.Size(47, 12);
+            this.lblStatus.TabIndex = 11;
+            this.lblStatus.Text = "Standby";
+            // 
+            // checkBox1
+            // 
+            this.ckbOverWrite.AutoSize = true;
+            this.ckbOverWrite.Location = new System.Drawing.Point(632, 596);
+            this.ckbOverWrite.Name = "ckbOverWrite";
+            this.ckbOverWrite.Size = new System.Drawing.Size(78, 16);
+            this.ckbOverWrite.TabIndex = 12;
+            this.ckbOverWrite.Text = "OverWrite";
+            this.ckbOverWrite.UseVisualStyleBackColor = true;
+            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 12F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(800, 626);
+            this.Controls.Add(this.ckbOverWrite);
             this.Controls.Add(this.lblStatus);
             this.Controls.Add(this.listViewPlaylists);
             this.Controls.Add(this.btnExtract);
@@ -221,6 +233,7 @@
         private System.Windows.Forms.Label lblStatus;
         private System.Windows.Forms.ColumnHeader colName;
         private System.Windows.Forms.ColumnHeader colCount;
+        private System.Windows.Forms.CheckBox ckbOverWrite;
     }
 }
 

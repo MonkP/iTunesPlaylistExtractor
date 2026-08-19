@@ -24,6 +24,10 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
         [DataMember]
         public List<string> CheckedPlaylistPersistentIds { get; set; }
 
+        /// <summary>提取时是否覆盖目标路径中已存在的音乐文件（m3u 始终覆盖）。</summary>
+        [DataMember]
+        public bool OverwriteFiles { get; set; }
+
         /// <summary>默认日志输出级别名称（Fatal/Error/Warn/Info/Debug），未配置时为 Error。</summary>
         [DataMember]
         public string LogLevel { get; set; }

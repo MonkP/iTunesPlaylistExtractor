@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using ITunesLibraryParser;
 
@@ -43,6 +44,9 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
         /// <summary>创建失败的 m3u 文件数。</summary>
         public int FailedM3u { get; set; }
 
+        /// <summary>提取后预期存在的曲目文件相对路径（相对目标路径），用于扫描多余文件。</summary>
+        public List<string> ExpectedTrackRelPaths { get; } = new List<string>();
+
         /// <summary>过程中是否出现过需要查看日志的问题。</summary>
         public bool HasIssues => SkippedTracks > 0 || FailedCopies > 0 || FailedM3u > 0;
 
@@ -64,7 +68,8 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
     /// <summary>
     /// 提取引擎（功能 6、7）：将勾选播放列表中的音乐文件按相对根目录的原始路径结构复制到目标路径，
     /// 并在目标路径生成 .m3u 播放列表文件（条目为相对路径）。
-    /// 先汇总去重全部待复制文件再执行复制，覆盖目标已存在的文件；
+    /// 先汇总去重全部待复制文件再执行复制；m3u 文件始终覆盖，
+    /// 音乐文件是否覆盖由 overwriteFiles 决定；
     /// 单个文件复制异常不中止过程，仅记录日志。
     /// </summary>
     internal static class PlaylistExtractor
@@ -78,12 +83,14 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
         /// 执行提取：汇总去重待复制文件 → 逐个复制（带进度）→ 逐个生成 m3u（带进度）。
         /// 在后台线程调用，进度通过 <paramref name="progress"/> 回报到 UI 线程。
         /// </summary>
+        /// <param name="overwriteFiles">true 时覆盖目标已存在的音乐文件；false 时保留已有文件不再复制。m3u 文件始终覆盖。</param>
         internal static ExtractResult Extract(string rootPath, string targetPath,
-            IReadOnlyList<ExtractPlaylist> playlists, IProgress<string> progress)
+            IReadOnlyList<ExtractPlaylist> playlists, bool overwriteFiles, IProgress<string> progress)
         {
             var result = new ExtractResult { SelectedPlaylists = playlists.Count };
             LogHelper.WriteLog(LogHelper.LogLevel.Info,
-                $"Extract started: root \"{rootPath}\", target \"{targetPath}\", {playlists.Count} playlists selected.");
+                $"Extract started: root \"{rootPath}\", target \"{targetPath}\", " +
+                $"{playlists.Count} playlists selected, overwrite files: {overwriteFiles}.");
             Directory.CreateDirectory(targetPath);
 
             var rootFull = Path.GetFullPath(rootPath);
@@ -136,6 +143,7 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
                 }
             }
             result.TotalTracks = copyPlan.Count;
+            result.ExpectedTrackRelPaths.AddRange(plannedSources.Keys);
 
             // 逐个复制，异常不中止，仅记录日志
             for (var i = 0; i < copyPlan.Count; i++)
@@ -145,8 +153,13 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
                 var destPath = Path.Combine(targetPath, file.Key);
                 try
                 {
+                    if (!overwriteFiles && File.Exists(destPath))
+                    {
+                        // 未启用覆盖：目标文件已存在则直接保留，视为目标中已就绪
+                        result.CopiedTracks++;
+                        continue;
+                    }
                     Directory.CreateDirectory(Path.GetDirectoryName(destPath));
-                    // 自动替换目标路径已存在的文件
                     File.Copy(file.Value, destPath, true);
                     result.CopiedTracks++;
                 }
@@ -202,6 +215,62 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
                 $"Extract finished. {summary}");
             return result;
         }
+
+        /// <summary>
+        /// 扫描目标路径下不属于本次提取结果的文件：
+        /// 未被本次勾选列表包含的曲目文件，以及本次未生成的 m3u 播放列表。
+        /// 返回多余文件的全路径列表；目标路径不存在时返回空列表。
+        /// </summary>
+        /// <param name="expectedRelPaths">本次提取的曲目文件相对路径（分隔符不限，大小写不敏感）。</param>
+        /// <param name="expectedM3uNames">本次生成的 m3u 文件名（位于目标路径根下）。</param>
+        internal static List<string> FindExtraFiles(string targetPath,
+            IReadOnlyCollection<string> expectedRelPaths, IReadOnlyCollection<string> expectedM3uNames)
+        {
+            if (!Directory.Exists(targetPath))
+                return new List<string>();
+
+            var expected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var relPath in expectedRelPaths ?? Enumerable.Empty<string>())
+                expected.Add(NormalizeRelPath(relPath));
+            foreach (var m3uName in expectedM3uNames ?? Enumerable.Empty<string>())
+                expected.Add(m3uName);
+
+            var targetFull = Path.GetFullPath(targetPath);
+            if (!targetFull.EndsWith(Path.DirectorySeparatorChar.ToString()))
+                targetFull += Path.DirectorySeparatorChar;
+
+            var extras = new List<string>();
+            foreach (var file in Directory.EnumerateFiles(targetPath, "*", SearchOption.AllDirectories))
+            {
+                if (!expected.Contains(NormalizeRelPath(file.Substring(targetFull.Length))))
+                    extras.Add(file);
+            }
+            return extras;
+        }
+
+        /// <summary>
+        /// 逐个删除文件，单个文件删除异常不中止，仅记录日志；返回成功删除的数量。
+        /// </summary>
+        internal static int DeleteFiles(IReadOnlyList<string> filePaths)
+        {
+            var deleted = 0;
+            foreach (var file in filePaths)
+            {
+                try
+                {
+                    File.Delete(file);
+                    deleted++;
+                }
+                catch (Exception ex)
+                {
+                    LogHelper.WriteLog(LogHelper.LogLevel.Error, $"Failed to delete \"{file}\".", ex);
+                }
+            }
+            return deleted;
+        }
+
+        /// <summary>将相对路径统一为反斜杠形式，便于大小写不敏感比较。</summary>
+        private static string NormalizeRelPath(string relPath) => relPath.Replace('/', '\\');
 
         /// <summary>
         /// 按“各父级文件夹到当前节点”的全路径构建 m3u 文件名：
