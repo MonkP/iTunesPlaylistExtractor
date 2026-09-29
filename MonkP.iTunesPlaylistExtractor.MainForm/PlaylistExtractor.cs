@@ -47,8 +47,21 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
         /// <summary>提取后预期存在的曲目文件相对路径（相对目标路径），用于扫描多余文件。</summary>
         public List<string> ExpectedTrackRelPaths { get; } = new List<string>();
 
+        /// <summary>
+        /// 本次待同步曲目文件的扩展名集合（含“.”前缀，不区分大小写，不含 m3u），
+        /// 多余文件清理仅处理扩展名与该集合一致的文件。
+        /// </summary>
+        public HashSet<string> SyncedExtensions { get; } =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>是否因失败数达到阈值而提前中止同步。</summary>
+        public bool AbortedEarly { get; set; }
+
+        /// <summary>提前中止时尚未尝试同步的曲目文件数。</summary>
+        public int NotAttempted { get; set; }
+
         /// <summary>过程中是否出现过需要查看日志的问题。</summary>
-        public bool HasIssues => SkippedTracks > 0 || FailedCopies > 0 || FailedM3u > 0;
+        public bool HasIssues => SkippedTracks > 0 || FailedCopies > 0 || FailedM3u > 0 || AbortedEarly;
 
         /// <summary>构建汇总文本，状态栏与弹窗显示一致的内容。</summary>
         public string BuildSummary()
@@ -61,6 +74,8 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
                 summary += $" {FailedCopies} copy failures.";
             if (FailedM3u > 0)
                 summary += $" {FailedM3u} m3u failures.";
+            if (AbortedEarly)
+                summary += $" Sync aborted at the failure threshold, {NotAttempted} file(s) not attempted.";
             return summary;
         }
     }
@@ -69,8 +84,8 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
     /// 提取引擎（功能 6、7）：将勾选播放列表中的音乐文件按相对根目录的原始路径结构复制到目标路径，
     /// 并在目标路径生成 .m3u 播放列表文件（条目为相对路径）。
     /// 先汇总去重全部待复制文件再执行复制；m3u 文件始终覆盖，
-    /// 音乐文件是否覆盖由 overwriteFiles 决定；
-    /// 单个文件复制异常不中止过程，仅记录日志。
+    /// 音乐文件是否覆盖由 overwriteFiles 决定（设备目标另按“路径 + 大小”判断是否跳过）；
+    /// 单个文件复制异常不中止过程仅记录日志，但失败数达到阈值时提前中止。
     /// </summary>
     internal static class PlaylistExtractor
     {
@@ -84,14 +99,15 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
         /// 在后台线程调用，进度通过 <paramref name="progress"/> 回报到 UI 线程。
         /// </summary>
         /// <param name="overwriteFiles">true 时覆盖目标已存在的音乐文件；false 时保留已有文件不再复制。m3u 文件始终覆盖。</param>
-        internal static ExtractResult Extract(string rootPath, string targetPath,
-            IReadOnlyList<ExtractPlaylist> playlists, bool overwriteFiles, IProgress<string> progress)
+        /// <param name="maxFailures">失败数达到该阈值时提前中止同步。</param>
+        internal static ExtractResult Extract(string rootPath, IExtractTarget target,
+            IReadOnlyList<ExtractPlaylist> playlists, bool overwriteFiles, int maxFailures, IProgress<string> progress)
         {
             var result = new ExtractResult { SelectedPlaylists = playlists.Count };
             LogHelper.WriteLog(LogHelper.LogLevel.Info,
-                $"Extract started: root \"{rootPath}\", target \"{targetPath}\", " +
-                $"{playlists.Count} playlists selected, overwrite files: {overwriteFiles}.");
-            Directory.CreateDirectory(targetPath);
+                $"Extract started: root \"{rootPath}\", target \"{target.Description}\", " +
+                $"{playlists.Count} playlists selected, overwrite files: {overwriteFiles}, " +
+                $"failure threshold: {maxFailures}.");
 
             var rootFull = Path.GetFullPath(rootPath);
             if (!rootFull.EndsWith(Path.DirectorySeparatorChar.ToString()))
@@ -144,30 +160,33 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
             }
             result.TotalTracks = copyPlan.Count;
             result.ExpectedTrackRelPaths.AddRange(plannedSources.Keys);
+            foreach (var relPath in plannedSources.Keys)
+                result.SyncedExtensions.Add(Path.GetExtension(relPath));
 
-            // 逐个复制，异常不中止，仅记录日志
+            // 逐个复制，异常不中止仅记录日志；失败数达到阈值时提前中止后续同步
             for (var i = 0; i < copyPlan.Count; i++)
             {
                 var file = copyPlan[i];
                 progress?.Report($"Copying ({i + 1}/{copyPlan.Count})");
-                var destPath = Path.Combine(targetPath, file.Key);
                 try
                 {
-                    if (!overwriteFiles && File.Exists(destPath))
-                    {
-                        // 未启用覆盖：目标文件已存在则直接保留，视为目标中已就绪
-                        result.CopiedTracks++;
-                        continue;
-                    }
-                    Directory.CreateDirectory(Path.GetDirectoryName(destPath));
-                    File.Copy(file.Value, destPath, true);
+                    target.CopyLocalFile(file.Key, file.Value, overwriteFiles);
                     result.CopiedTracks++;
                 }
                 catch (Exception ex)
                 {
                     result.FailedCopies++;
                     LogHelper.WriteLog(LogHelper.LogLevel.Error,
-                        $"Failed to copy \"{file.Value}\" to \"{destPath}\".", ex);
+                        $"Failed to copy \"{file.Value}\" to \"{file.Key}\".", ex);
+                    if (result.FailedCopies >= maxFailures)
+                    {
+                        result.AbortedEarly = true;
+                        result.NotAttempted = copyPlan.Count - i - 1;
+                        LogHelper.WriteLog(LogHelper.LogLevel.Error,
+                            $"Sync aborted: {result.FailedCopies} failure(s) reached the threshold {maxFailures}; " +
+                            $"{result.NotAttempted} file(s) not attempted.");
+                        break;
+                    }
                 }
             }
 
@@ -182,31 +201,30 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
                     LogHelper.WriteLog(LogHelper.LogLevel.Warn,
                         $"Duplicate m3u name \"{playlist.M3uFileName}\", the earlier one will be overwritten.");
                 }
-                var m3uPath = Path.Combine(targetPath, playlist.M3uFileName);
+                var m3uName = playlist.M3uFileName;
                 try
                 {
                     var itemCount = 0;
-                    // m3u 使用不带 BOM 的 UTF-8，兼容大多数播放器
-                    using (var writer = new StreamWriter(m3uPath, false, new UTF8Encoding(false)))
+                    var sb = new StringBuilder();
+                    // m3u 使用不带 BOM 的 UTF-8，兼容大多数播放器；换行统一为 \n，始终覆盖已有文件
+                    sb.AppendLine("#EXTM3U");
+                    foreach (var track in playlist.Tracks)
                     {
-                        writer.WriteLine("#EXTM3U");
-                        foreach (var track in playlist.Tracks)
+                        // 解析失败被跳过的曲目不会出现在 m3u 中
+                        if (trackRelPaths.TryGetValue(track.TrackId, out var relPath))
                         {
-                            // 解析失败被跳过的曲目不会出现在 m3u 中
-                            if (trackRelPaths.TryGetValue(track.TrackId, out var relPath))
-                            {
-                                writer.WriteLine(relPath);
-                                itemCount++;
-                            }
+                            sb.AppendLine(relPath);
+                            itemCount++;
                         }
                     }
+                    target.WriteText(m3uName, sb.ToString());
                     result.CreatedM3u++;
-                    LogHelper.WriteLog(LogHelper.LogLevel.Info, $"Created m3u \"{m3uPath}\" with {itemCount} items.");
+                    LogHelper.WriteLog(LogHelper.LogLevel.Info, $"Created m3u \"{m3uName}\" with {itemCount} items.");
                 }
                 catch (Exception ex)
                 {
                     result.FailedM3u++;
-                    LogHelper.WriteLog(LogHelper.LogLevel.Error, $"Failed to create m3u \"{m3uPath}\".", ex);
+                    LogHelper.WriteLog(LogHelper.LogLevel.Error, $"Failed to create m3u \"{m3uName}\".", ex);
                 }
             }
 
@@ -218,52 +236,56 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
 
         /// <summary>
         /// 扫描目标路径下不属于本次提取结果的文件：
-        /// 未被本次勾选列表包含的曲目文件，以及本次未生成的 m3u 播放列表。
-        /// 返回多余文件的全路径列表；目标路径不存在时返回空列表。
+        /// 未被本次勾选列表包含的曲目文件，以及本次未生成的 m3u 播放列表；
+        /// 且仅返回扩展名与本次待同步文件扩展名一致的文件（避免误删无关文件）。
+        /// 返回多余文件的相对路径列表（相对目标根路径）。
         /// </summary>
         /// <param name="expectedRelPaths">本次提取的曲目文件相对路径（分隔符不限，大小写不敏感）。</param>
         /// <param name="expectedM3uNames">本次生成的 m3u 文件名（位于目标路径根下）。</param>
-        internal static List<string> FindExtraFiles(string targetPath,
-            IReadOnlyCollection<string> expectedRelPaths, IReadOnlyCollection<string> expectedM3uNames)
+        /// <param name="allowedExtensions">允许清理的扩展名集合（含“.”前缀，大小写不敏感）。</param>
+        internal static List<string> FindExtraFiles(IExtractTarget target,
+            IReadOnlyCollection<string> expectedRelPaths, IReadOnlyCollection<string> expectedM3uNames,
+            IReadOnlyCollection<string> allowedExtensions)
         {
-            if (!Directory.Exists(targetPath))
-                return new List<string>();
-
             var expected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var relPath in expectedRelPaths ?? Enumerable.Empty<string>())
                 expected.Add(NormalizeRelPath(relPath));
             foreach (var m3uName in expectedM3uNames ?? Enumerable.Empty<string>())
                 expected.Add(m3uName);
 
-            var targetFull = Path.GetFullPath(targetPath);
-            if (!targetFull.EndsWith(Path.DirectorySeparatorChar.ToString()))
-                targetFull += Path.DirectorySeparatorChar;
+            var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var extension in allowedExtensions ?? Enumerable.Empty<string>())
+                allowed.Add(extension);
 
             var extras = new List<string>();
-            foreach (var file in Directory.EnumerateFiles(targetPath, "*", SearchOption.AllDirectories))
+            foreach (var relPath in target.EnumerateRelativeFiles())
             {
-                if (!expected.Contains(NormalizeRelPath(file.Substring(targetFull.Length))))
-                    extras.Add(file);
+                var normalized = NormalizeRelPath(relPath);
+                if (expected.Contains(normalized))
+                    continue;
+                if (!allowed.Contains(Path.GetExtension(normalized)))
+                    continue;
+                extras.Add(normalized);
             }
             return extras;
         }
 
         /// <summary>
-        /// 逐个删除文件，单个文件删除异常不中止，仅记录日志；返回成功删除的数量。
+        /// 逐个删除目标中的文件（相对路径），单个文件删除异常不中止，仅记录日志；返回成功删除的数量。
         /// </summary>
-        internal static int DeleteFiles(IReadOnlyList<string> filePaths)
+        internal static int DeleteFiles(IExtractTarget target, IReadOnlyList<string> relPaths)
         {
             var deleted = 0;
-            foreach (var file in filePaths)
+            foreach (var relPath in relPaths)
             {
                 try
                 {
-                    File.Delete(file);
+                    target.DeleteFile(relPath);
                     deleted++;
                 }
                 catch (Exception ex)
                 {
-                    LogHelper.WriteLog(LogHelper.LogLevel.Error, $"Failed to delete \"{file}\".", ex);
+                    LogHelper.WriteLog(LogHelper.LogLevel.Error, $"Failed to delete \"{relPath}\".", ex);
                 }
             }
             return deleted;

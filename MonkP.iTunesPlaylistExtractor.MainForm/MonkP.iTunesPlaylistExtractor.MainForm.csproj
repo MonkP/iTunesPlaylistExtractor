@@ -36,6 +36,9 @@
     <Reference Include="ITunesLibraryParser, Version=1.1.27.0, Culture=neutral, processorArchitecture=MSIL">
       <HintPath>..\packages\iTunesLibraryParser.1.1.27\lib\net461\ITunesLibraryParser.dll</HintPath>
     </Reference>
+    <Reference Include="MediaDevices">
+      <HintPath>..\packages\MediaDevices.1.10.2\lib\net48\MediaDevices.dll</HintPath>
+    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Runtime.Serialization" />
@@ -50,15 +53,21 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="DevicePickerForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="Form1.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="Form1.Designer.cs">
       <DependentUpon>Form1.cs</DependentUpon>
     </Compile>
+    <Compile Include="IExtractTarget.cs" />
     <Compile Include="LibraryPlaylist.cs" />
     <Compile Include="LibraryPlaylistParser.cs" />
+    <Compile Include="LocalDirectoryTarget.cs" />
     <Compile Include="LogHelper.cs" />
+    <Compile Include="MtpDeviceTarget.cs" />
     <Compile Include="PlaylistExtractor.cs" />
     <Compile Include="PreferenceStore.cs" />
     <Compile Include="Program.cs" />

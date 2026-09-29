@@ -23,13 +23,29 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
         /// <summary>从偏好文件恢复的勾选列表 Persistent ID，在播放列表加载完成后应用一次。</summary>
         private HashSet<string> _pendingCheckedIds;
 
+        /// <summary>当前目标路径的类型：本地目录或设备路径。</summary>
+        private TargetKind _targetKind = TargetKind.Local;
+
+        /// <summary>目标为设备时记录的 DeviceId。</summary>
+        private string _deviceId;
+
+        /// <summary>目标为设备时保持的连接（提取后释放）。</summary>
+        private MtpDeviceTarget _deviceTarget;
+
         public Form1()
         {
             InitializeComponent();
         }
 
+        /// <summary>窗体关闭时释放设备连接资源。</summary>
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            _deviceTarget?.Dispose();
+            base.OnFormClosed(e);
+        }
+
         /// <summary>
-        /// 窗体加载时调用：从偏好文件恢复上次的路径、日志级别、覆盖开关及勾选状态；
+        /// 窗体加载时调用：从偏好文件恢复上次的路径（含目标类型）、日志级别、覆盖开关及勾选状态；
         /// 若资料库 XML 文件存在则自动触发加载。
         /// </summary>
         private void Form1_Load(object sender, EventArgs e)
@@ -39,10 +55,20 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
             if (preferences == null)
                 return;
 
-            // 将偏好填充到对应文本框
+            // 将偏好填充到对应文本框；目标路径按来源类型恢复，设备路径禁止手动修改
             txtLibraryFilePath.Text = preferences.LibraryFilePath ?? string.Empty;
             txtRootPath.Text = preferences.RootPath ?? string.Empty;
-            txtTargetBox.Text = preferences.TargetPath ?? string.Empty;
+            _targetKind = preferences.TargetKind;
+            _deviceId = preferences.DeviceId;
+            if (_targetKind == TargetKind.Device)
+            {
+                txtTargetBox.Text = preferences.DevicePath ?? string.Empty;
+                SetTargetBoxReadOnly(true);
+            }
+            else
+            {
+                txtTargetBox.Text = preferences.TargetPath ?? string.Empty;
+            }
             ckbOverWrite.Checked = preferences.OverwriteFiles;
             if (Enum.TryParse(preferences.LogLevel, true, out LogHelper.LogLevel logLevel))
                 LogHelper.DefaultLevel = logLevel;
@@ -87,17 +113,46 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
         }
 
         /// <summary>
-        /// 弹出文件夹选择对话框，让用户指定播放列表提取的目标路径。
+        /// 弹出文件夹选择对话框，让用户指定本地提取目标路径；选择后目标类型切换为本地。
         /// </summary>
         private void btnChooseTargetPath_Click(object sender, EventArgs e)
         {
             using (var dialog = new FolderBrowserDialog())
             {
-                dialog.Description = "Choose the target path to extract playlists to";
+                dialog.Description = "Choose the local target path to extract playlists to";
                 if (dialog.ShowDialog(this) != DialogResult.OK)
                     return;
+                _targetKind = TargetKind.Local;
+                _deviceId = null;
+                SetTargetBoxReadOnly(false);
                 txtTargetBox.Text = dialog.SelectedPath;
             }
+        }
+
+        /// <summary>
+        /// 弹出设备路径选择对话框，让用户在已连接的安卓设备上选择提取目标路径；
+        /// 选择后目标类型切换为设备，且路径文本框禁止手动修改。
+        /// </summary>
+        private void btnChoosePathOnDevice_Click(object sender, EventArgs e)
+        {
+            using (var picker = new DevicePickerForm())
+            {
+                if (picker.ShowDialog(this) != DialogResult.OK || string.IsNullOrEmpty(picker.SelectedPath))
+                    return;
+                _targetKind = TargetKind.Device;
+                _deviceId = picker.SelectedDeviceId;
+                txtTargetBox.Text = picker.SelectedPath;
+                SetTargetBoxReadOnly(true);
+            }
+        }
+
+        /// <summary>
+        /// 切换目标路径文本框的只读状态：设备路径禁止手动修改
+        /// （只读状态下仍可选择复制，背景色保持默认）。
+        /// </summary>
+        private void SetTargetBoxReadOnly(bool readOnly)
+        {
+            txtTargetBox.ReadOnly = readOnly;
         }
 
         /// <summary>
@@ -138,32 +193,87 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
+            if (_targetKind == TargetKind.Device && string.IsNullOrEmpty(_deviceId))
+            {
+                MessageBox.Show(this, "Please choose a path on a connected device.", "Extract",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
 
             btnExtract.Enabled = false;
             // Progress 在 UI 线程创建，自动将进度文本封送回 UI 线程
             var progress = new Progress<string>(status => lblStatus.Text = status);
+            // 失败中止阈值：待同步数的 10% 与固定值 10 中的较大者（参数只读，不提供 UI）
+            var targetKind = _targetKind;
+            var deviceId = _deviceId;
+            var overwriteFiles = ckbOverWrite.Checked;
             try
             {
-                var result = await Task.Run(() => PlaylistExtractor.Extract(
-                    rootPath, targetPath, playlists, ckbOverWrite.Checked, progress));
+                var result = await Task.Run(() =>
+                {
+                    IExtractTarget target;
+                    if (targetKind == TargetKind.Device)
+                    {
+                        var deviceTarget = MtpDeviceTarget.Connect(deviceId, targetPath);
+                        if (deviceTarget == null)
+                            throw new InvalidOperationException(
+                                "Failed to connect the device, or the chosen path no longer exists on it. " +
+                                "Keep the device connected, unlocked and in file-transfer mode.");
+                        target = deviceTarget;
+                    }
+                    else
+                    {
+                        target = new LocalDirectoryTarget(targetPath);
+                    }
+
+                    try
+                    {
+                        var maxFailures = (int)Math.Max(Preferences.MaxErrorCount,
+                            Math.Ceiling(playlists.Sum(p => p.Tracks.Count) * Preferences.MaxErrorRatio));
+                        return PlaylistExtractor.Extract(rootPath, target, playlists, overwriteFiles, maxFailures, progress);
+                    }
+                    finally
+                    {
+                        if (target is IDisposable disposable)
+                            disposable.Dispose();
+                    }
+                });
                 var summary = result.BuildSummary();
 
-                // 无论是否启用覆盖，都检查目标路径中不属于本次提取结果的文件
-                // （本次未勾选列表的 m3u，或勾选列表未包含的曲目文件）
-                var extraFiles = PlaylistExtractor.FindExtraFiles(targetPath,
-                    result.ExpectedTrackRelPaths,
-                    playlists.Select(p => p.M3uFileName).ToList());
-                if (extraFiles.Count > 0)
+                // 无论是否启用覆盖，都检查目标中不属于本次提取结果、
+                // 且扩展名与本次待同步文件一致的文件（避免误删无关文件）
+                IExtractTarget cleanupTarget;
+                if (_targetKind == TargetKind.Device)
                 {
-                    var choice = MessageBox.Show(this,
-                        "Target Path contains files that not included in playlists choosen this time, would you like to delete them?",
-                        "Extract", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-                    if (choice == DialogResult.Yes)
+                    // 重新连接设备用于清理（提取用的连接已释放）；本地目标无状态无需释放，
+                    // 设备连接保存在字段中，由窗体关闭时统一释放
+                    _deviceTarget?.Dispose();
+                    _deviceTarget = MtpDeviceTarget.Connect(_deviceId, targetPath);
+                    cleanupTarget = _deviceTarget;
+                }
+                else
+                {
+                    cleanupTarget = new LocalDirectoryTarget(targetPath);
+                }
+
+                if (cleanupTarget != null)
+                {
+                    var extraFiles = PlaylistExtractor.FindExtraFiles(cleanupTarget,
+                        result.ExpectedTrackRelPaths,
+                        playlists.Select(p => p.M3uFileName).ToList(),
+                        result.SyncedExtensions);
+                    if (extraFiles.Count > 0)
                     {
-                        var deleted = PlaylistExtractor.DeleteFiles(extraFiles);
-                        LogHelper.WriteLog(LogHelper.LogLevel.Info,
-                            $"Deleted {deleted} extra files from \"{targetPath}\".");
-                        summary += $" Deleted {deleted} extra files.";
+                        var choice = MessageBox.Show(this,
+                            "Target Path contains files that not included in playlists choosen this time, would you like to delete them?",
+                            "Extract", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                        if (choice == DialogResult.Yes)
+                        {
+                            var deleted = PlaylistExtractor.DeleteFiles(cleanupTarget, extraFiles);
+                            LogHelper.WriteLog(LogHelper.LogLevel.Info,
+                                $"Deleted {deleted} extra files from \"{cleanupTarget.Description}\".");
+                            summary += $" Deleted {deleted} extra files.";
+                        }
                     }
                 }
 
@@ -260,7 +370,8 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
         }
 
         /// <summary>
-        /// 将窗体当前选择的路径、覆盖开关与勾选的播放列表 Persistent ID 写入运行目录下的 preference.json。
+        /// 将窗体当前选择的路径（含目标类型）、覆盖开关与勾选的播放列表 Persistent ID
+        /// 写入运行目录下的 preference.json。
         /// </summary>
         private void SavePreferences()
         {
@@ -277,10 +388,13 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
                 {
                     LibraryFilePath = txtLibraryFilePath.Text?.Trim(),
                     RootPath = txtRootPath.Text?.Trim(),
-                    TargetPath = txtTargetBox.Text?.Trim(),
+                    TargetPath = _targetKind == TargetKind.Local ? txtTargetBox.Text?.Trim() : null,
                     CheckedPlaylistPersistentIds = checkedIds,
                     OverwriteFiles = ckbOverWrite.Checked,
                     LogLevel = LogHelper.DefaultLevel.ToString(),
+                    TargetKind = _targetKind,
+                    DeviceId = _deviceId,
+                    DevicePath = _targetKind == TargetKind.Device ? txtTargetBox.Text?.Trim() : null,
                 });
             }
             catch (Exception ex)
