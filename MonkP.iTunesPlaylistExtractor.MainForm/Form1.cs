@@ -29,6 +29,9 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
         /// <summary>目标为设备时记录的 DeviceId。</summary>
         private string _deviceId;
 
+        /// <summary>目标为设备时记录的原始设备路径（用于连接，不含文本框中的友好名称前缀）。</summary>
+        private string _devicePath;
+
         /// <summary>目标为设备时保持的连接（提取后释放）。</summary>
         private MtpDeviceTarget _deviceTarget;
 
@@ -60,6 +63,7 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
             txtRootPath.Text = preferences.RootPath ?? string.Empty;
             _targetKind = preferences.TargetKind;
             _deviceId = preferences.DeviceId;
+            _devicePath = preferences.DeviceRawPath;
             if (_targetKind == TargetKind.Device)
             {
                 txtTargetBox.Text = preferences.DevicePath ?? string.Empty;
@@ -124,6 +128,7 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
                     return;
                 _targetKind = TargetKind.Local;
                 _deviceId = null;
+                _devicePath = null;
                 SetTargetBoxReadOnly(false);
                 txtTargetBox.Text = dialog.SelectedPath;
             }
@@ -141,6 +146,7 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
                     return;
                 _targetKind = TargetKind.Device;
                 _deviceId = picker.SelectedDeviceId;
+                _devicePath = picker.SelectedDevicePath;
                 txtTargetBox.Text = picker.SelectedPath;
                 SetTargetBoxReadOnly(true);
             }
@@ -193,7 +199,8 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            if (_targetKind == TargetKind.Device && string.IsNullOrEmpty(_deviceId))
+            if (_targetKind == TargetKind.Device &&
+                (string.IsNullOrEmpty(_deviceId) || string.IsNullOrEmpty(_devicePath)))
             {
                 MessageBox.Show(this, "Please choose a path on a connected device.", "Extract",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -206,6 +213,7 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
             // 失败中止阈值：待同步数的 10% 与固定值 10 中的较大者（参数只读，不提供 UI）
             var targetKind = _targetKind;
             var deviceId = _deviceId;
+            var devicePath = _devicePath;
             var overwriteFiles = ckbOverWrite.Checked;
             try
             {
@@ -214,7 +222,7 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
                     IExtractTarget target;
                     if (targetKind == TargetKind.Device)
                     {
-                        var deviceTarget = MtpDeviceTarget.Connect(deviceId, targetPath);
+                        var deviceTarget = MtpDeviceTarget.Connect(deviceId, devicePath);
                         if (deviceTarget == null)
                             throw new InvalidOperationException(
                                 "Failed to connect the device, or the chosen path no longer exists on it. " +
@@ -248,7 +256,7 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
                     // 重新连接设备用于清理（提取用的连接已释放）；本地目标无状态无需释放，
                     // 设备连接保存在字段中，由窗体关闭时统一释放
                     _deviceTarget?.Dispose();
-                    _deviceTarget = MtpDeviceTarget.Connect(_deviceId, targetPath);
+                    _deviceTarget = MtpDeviceTarget.Connect(_deviceId, _devicePath);
                     cleanupTarget = _deviceTarget;
                 }
                 else
@@ -395,6 +403,7 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
                     TargetKind = _targetKind,
                     DeviceId = _deviceId,
                     DevicePath = _targetKind == TargetKind.Device ? txtTargetBox.Text?.Trim() : null,
+                    DeviceRawPath = _targetKind == TargetKind.Device ? _devicePath : null,
                 });
             }
             catch (Exception ex)

@@ -50,9 +50,13 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
         [DataMember]
         public string DeviceId { get; set; }
 
-        /// <summary>目标为设备时记录的设备路径（形如“内部共享存储空间\Music”）。</summary>
+        /// <summary>目标为设备时记录的设备路径友好字面量（仅用于显示，形如“Pixel内部共享存储空间\Music”）。</summary>
         [DataMember]
         public string DevicePath { get; set; }
+
+        /// <summary>目标为设备时记录的原始设备路径（用于连接，形如“内部共享存储空间\Music”）。</summary>
+        [DataMember]
+        public string DeviceRawPath { get; set; }
 
         /// <summary>
         /// 同步失败中止阈值的两个参数（只读，不提供 UI）：

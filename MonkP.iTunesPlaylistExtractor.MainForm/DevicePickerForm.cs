@@ -22,8 +22,11 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
         /// <summary>所选设备的 DeviceId（未确认时为 null）。</summary>
         public string SelectedDeviceId { get; private set; }
 
-        /// <summary>所选设备路径（形如“内部共享存储空间\Music”，未确认时为 null）。</summary>
+        /// <summary>所选设备路径的友好字面量（形如“Pixel内部共享存储空间\Music”，仅用于显示，未确认时为 null）。</summary>
         public string SelectedPath { get; private set; }
+
+        /// <summary>所选设备的原始设备路径（形如“内部共享存储空间\Music”，用于连接，未确认时为 null）。</summary>
+        public string SelectedDevicePath { get; private set; }
 
         public DevicePickerForm()
         {
@@ -236,6 +239,7 @@ namespace MonkP.iTunesPlaylistExtractor.MainForm
             if (_folderTree.SelectedNode?.Tag is NodeState state)
             {
                 SelectedDeviceId = state.Device.DeviceId;
+                SelectedDevicePath = state.Path;
                 SelectedPath = getDeviceDisplayName(state.Device) + state.Path;
                 DialogResult = DialogResult.OK;
             }
