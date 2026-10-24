@@ -12,12 +12,12 @@
 4. 在列表视图中勾选要提取的播放列表。勾选播放列表文件夹时，会将其作为一整个播放列表提取，包含内部所有播放列表的去重曲目集合。
 5. 选择要提取到的目标路径。使用 **Choose Local Path** 选择本机上的文件夹，或使用 **Choose Path on Device** 在设备选择器中浏览已连接的安卓设备（经 MTP）并选择其上的文件夹。两个按钮都会把所选路径写入同一个目标路径文本框，由记录的路径来源决定点击提取时使用哪个目标；文本框显示设备路径时禁止手动修改。请保持设备已连接、已解锁并处于文件传输（MTP）模式。
 6. 点击"提取"按钮后，所选播放列表中的音乐文件将被提取到目标路径，保持与所选根路径完全相同的相对路径结构。
-    例如，根路径为 `F:/musics`，其中一个提取文件为 `F:/music/周杰伦/叶惠美/晴天.mp3`，目标路径为 `G:/PickedMusic`。那么该文件会被复制到 `G:/PickedMusic/周杰伦/叶惠美/晴天.mp3`。
-    所有来自所选播放列表的文件在复制前会被收集和去重。目标路径中已存在的音乐文件是否覆盖由 **OverWrite** 复选框决定：勾选时覆盖已有音乐文件；不勾选时保留已有文件不再复制。当目标为设备时，已存在相同相对路径且大小相同的文件视为无需更新，因此重复提取只会传输有变化的文件。`.m3u` 文件始终重写。单个文件的复制失败不会中断整个提取过程，仅会被记录到日志并继续尝试下一个文件。但当失败数达到“待同步文件数的 10%”与 10 两者中较大的数时，将跳过剩余文件并在汇总中报告中止（两个阈值以 `MaxErrorRatio`/`MaxErrorCount` 的形式存放在 `preference.json` 中，不提供 UI 选项）。
+    例如，根路径为 `F:/musics`，其中一个提取文件为 `F:/musics/周杰伦/叶惠美/晴天.mp3`，目标路径为 `G:/PickedMusic`。那么该文件会被复制到 `G:/PickedMusic/周杰伦/叶惠美/晴天.mp3`。
+    所有来自所选播放列表的文件在复制前会被收集和去重。当曲目没有本地文件位置、指向非本地资源、或位于所选根路径之外时，该曲目会被跳过（并在汇总中计入 `Skipped`）。目标路径中已存在的音乐文件是否覆盖由 **OverWrite** 复选框决定：勾选时覆盖已有音乐文件；不勾选时保留已有文件不再复制。当目标为设备时，已存在相同相对路径且大小相同的文件视为无需更新，因此重复提取只会传输有变化的文件。`.m3u` 文件始终重写。单个文件的复制失败不会中断整个提取过程，仅会被记录到日志并继续尝试下一个文件。但当失败数达到“待同步文件数的 10%”与 10 两者中较大的数时，将跳过剩余文件并在汇总中报告中止（两个阈值以 `MaxErrorRatio`/`MaxErrorCount` 的形式存放在 `preference.json` 中，不提供 UI 选项）。
 7. 播放列表本身会被提取为 `.m3u` 文件，创建在目标路径下。每个 `.m3u` 文件包含其原始播放列表中的音乐条目，但文件路径为相对路径。
     `.m3u` 文件的命名方式为：从顶层文件夹到勾选项的完整路径，以 `-` 连接。每一级父文件夹名称压缩为最多前 6 个字符，勾选项保留完整名称，文件名中的非法字符替换为 `_`。例如，在播放列表文件夹 `周杰伦` 内勾选播放列表 `周杰伦全集`，会生成 `周杰伦-周杰伦全集.m3u`。
 8. 提取完成后，会检查目标路径中是否存在本次所选播放列表未包含的文件，例如本次未勾选的播放列表留下的旧 `.m3u`，或勾选列表未包含的音乐文件。只有扩展名与本次待同步文件一致的文件才会被纳入清理范围，无关文件不受影响。若存在，会弹窗询问 "Target Path contains files that not included in playlists choosen this time, would you like to delete them?"：选择 Yes 自动删除（删除数量会追加到汇总信息），选择 No 则保留。
-9. 现在可以将整个目标路径的内容移动到设备上，然后把 `m3u` 播放列表导入你喜欢的播放器 app。
+9. 现在可以将整个目标路径的内容移动到设备上（如果你选择的是本地路径），然后把 `m3u` 播放列表导入你喜欢的播放器 app。
 10. 自动记忆之前的选择。资料库文件、根路径、目标路径（包括它是本地路径还是设备路径、以及是哪台设备）、OverWrite 选项以及上次提取时勾选的播放列表会在点击"提取"时保存到应用目录下的 `preference.json` 中，下次启动时自动恢复。
 11. 进度和摘要显示在状态栏中，例如提取时显示 `Copying (5/30)` 和 `Creating m3u (1/5)`。提取完成后会弹出摘要提示（所选/已创建的播放列表数量和曲目数量）。如果出现问题，关闭提示后会自动打开当天的日志文件。
 12. 日志写入应用目录下的 `log/yyyy-MM-dd.log`。最低记录级别（Fatal/Error/Warn/Info/Debug）由 `preference.json` 中的 `LogLevel` 字段设置，默认为 `Error`。
@@ -47,4 +47,25 @@ MTP 功能（选择安卓设备上的路径作为目标并同步播放列表）�
 >
 > THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-本项目还使用了 [MediaDevices](https://github.com/Bassman2/MediaDevices)，Copyright (c) 2018 Ralf Beckers，基于 [MIT 许可证](https://github.com/Bassman2/MediaDevices/blob/master/LICENSE) 授权。
+本项目还使用了 [MediaDevices](https://github.com/Bassman2/MediaDevices)，Copyright (c) 2018 Ralf Beckers，基于 [MIT 许可证](https://github.com/Bassman2/MediaDevices/blob/master/LICENSE) 授权：
+> MIT License
+
+> Copyright (c) 2017 - 2023 Ralf Beckers
+
+> Permission is hereby granted, free of charge, to any person obtaining a copy
+> of this software and associated documentation files (the "Software"), to deal
+> in the Software without restriction, including without limitation the rights
+> to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+> copies of the Software, and to permit persons to whom the Software is
+> furnished to do so, subject to the following conditions:
+> 
+> The above copyright notice and this permission notice shall be included in all
+> copies or substantial portions of the Software.
+> 
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+> IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+> FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+> AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+> LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+> OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+> SOFTWARE.
